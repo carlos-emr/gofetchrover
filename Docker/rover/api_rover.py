@@ -56,6 +56,11 @@ mule_log_file = "/mule/logs/mule.log"
 log_level_name = config.get("log_level", "DEBUG").upper()
 log_level = getattr(logging, log_level_name, logging.DEBUG)
 
+# Testing mode: when true, always sends negative ACK so messages remain on Excelleris.
+# Files are still downloaded and saved normally for review.
+# Set to false in rover_config.json when ready for production.
+testing_mode = config.get("testing_mode", False)
+
 logging.basicConfig(filename=log_file, level=log_level, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def is_locked():
@@ -264,6 +269,8 @@ def sign_out(session, base_url, cookies):
 def main():
 
     logger.info("Script is running")
+    if testing_mode:
+        logger.info("*** TESTING MODE ENABLED - positive ACK will NOT be sent, messages will remain on Excelleris ***")
 
     # if is_locked():
     #     logger.info("Script is already running. Exiting.")
@@ -282,9 +289,14 @@ def main():
         status = query_new_results(session, base_url, cookies, pending=True)
 
         if status is True:
-            # Messages successfully downloaded and saved - mark them as received
-            send_acknowledgement(session, base_url, cookies, positive=True)
-            logger.info("Positive acknowledgement sent")
+            if testing_mode:
+                # TESTING MODE: files saved but send negative ACK so messages stay on Excelleris
+                send_acknowledgement(session, base_url, cookies, positive=False)
+                logger.info("TESTING MODE: Files saved for review. Negative ACK sent - messages remain on Excelleris.")
+            else:
+                # Messages successfully downloaded and saved - mark them as received
+                send_acknowledgement(session, base_url, cookies, positive=True)
+                logger.info("Positive acknowledgement sent")
         elif status is None:
             # No messages available (<HL7Messages/>) - nothing to acknowledge
             logger.info("No messages to process, skipping acknowledgement.")
