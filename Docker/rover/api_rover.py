@@ -119,28 +119,39 @@ def query_new_results(session, base_url, cookies, pending=False):
         data['Pending'] = 'Yes'
 
     response = session.post(base_url + 'hl7pull.aspx', data=data, cookies=cookies)
-    
+
     if response.status_code == 200:
 
         # Parse the XML response
         root = ET.fromstring(response.text)
 
-        # Extract the MessageCount from the root element
-        message_count = root.get('MessageCount')
-        if message_count is None:
-            logger.info("MessageCount attribute not found in the response.")
-            return False
-
-        # Convert message_count to integer for comparison
-        try:
-            message_count = int(message_count)
-        except ValueError:
-            logger.info("MessageCount is not a valid integer.")
-            return False
+        # Log the root element tag and attributes for debugging
+        logger.debug(f"Response root tag: {root.tag}, attributes: {root.attrib}")
 
         # Find all Message elements
         messages = root.findall('.//Message')
         actual_count = len(messages)
+
+        # Extract the MessageCount from the root element
+        message_count = root.get('MessageCount')
+        if message_count is not None:
+            # Convert message_count to integer for comparison
+            try:
+                message_count = int(message_count)
+            except ValueError:
+                logger.info("MessageCount is not a valid integer.")
+                return False
+
+            # Verify the count
+            if actual_count != message_count:
+                logger.info(f"Mismatch: Expected {message_count} messages, but found {actual_count}.")
+                return False
+        else:
+            logger.info(f"MessageCount attribute not found in the response. Found {actual_count} Message element(s) in XML.")
+
+        if actual_count == 0:
+            logger.info("No messages available for download.")
+            return False
 
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         file_name = f'response_{timestamp}.xml'
@@ -153,12 +164,6 @@ def query_new_results(session, base_url, cookies, pending=False):
         except Exception as e:
             logger.error(f"Failed to write file: {e}")
             return False
-
-        # Verify the count
-        if actual_count != message_count:
-            logger.info(f"Mismatch: Expected {message_count} messages, but found {actual_count}.")
-            return False
-
 
         # Specify the source file path and the destination file path
         source = file_path
