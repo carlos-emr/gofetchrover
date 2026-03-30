@@ -13,8 +13,6 @@ script_dir = "/volumes/rover/"
 
 log_file = "/volumes/rover/gfr.log"
 
-logging.basicConfig(filename=log_file, level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-
 # Create a logger
 logger = logging.getLogger(__name__)
 
@@ -54,6 +52,12 @@ app_version = config["app_version"]
 verification_interval = config["verification_interval"]
 mule_log_file = "/mule/logs/mule.log"
 
+# Log level: configurable via rover_config.json, defaults to DEBUG
+log_level_name = config.get("log_level", "DEBUG").upper()
+log_level = getattr(logging, log_level_name, logging.DEBUG)
+
+logging.basicConfig(filename=log_file, level=log_level, format='%(asctime)s - %(levelname)s - %(message)s')
+
 def is_locked():
     """Check if the lock file exists."""
     return os.path.exists(lock_file)
@@ -66,6 +70,18 @@ def create_lock():
 def remove_lock():
     """Remove the lock file."""
     os.remove(lock_file)
+
+def verify_file_on_disk(file_path, expected_min_size=1):
+    """Verify a file exists on disk and has content."""
+    if not os.path.exists(file_path):
+        logger.error(f"VERIFICATION FAILED: File does not exist: {file_path}")
+        return False
+    file_size = os.path.getsize(file_path)
+    if file_size < expected_min_size:
+        logger.error(f"VERIFICATION FAILED: File too small ({file_size} bytes): {file_path}")
+        return False
+    logger.info(f"VERIFIED: {file_path} exists ({file_size} bytes)")
+    return True
 
 # Authentication
 def authenticate(base_url):
@@ -119,9 +135,30 @@ def query_new_results(session, base_url, cookies, pending=False):
 
     logger.info(f"Querying for new results with data: {data}")
     response = session.post(base_url + 'hl7pull.aspx', data=data, cookies=cookies)
+    response_size = len(response.text)
+    logger.info(f"Query response: HTTP {response.status_code}, body size: {response_size} chars")
 
     if response.status_code == 200:
-        # Log the full response for debugging
+        # Save raw response to disk IMMEDIATELY before any parsing
+        # This ensures we never lose data even if our parsing code has a bug
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        file_name = f'response_{timestamp}.xml'
+        file_path = os.path.join(incoming_xml_folder_path, file_name)
+
+        try:
+            with open(file_path, 'w') as file:
+                file.write(response.text)
+        except Exception as e:
+            logger.error(f"CRITICAL: Failed to save raw response to {file_path}: {e}")
+            return False
+
+        if not verify_file_on_disk(file_path):
+            logger.error(f"CRITICAL: Raw response file verification failed: {file_path}")
+            return False
+
+        logger.info(f"Raw response saved to {file_path}")
+
+        # Log response for debugging
         logger.debug(f"Query response body (first 2000 chars): {response.text[:2000]}")
 
         # Parse the XML response
@@ -129,7 +166,7 @@ def query_new_results(session, base_url, cookies, pending=False):
             root = ET.fromstring(response.text)
         except ET.ParseError as e:
             logger.error(f"Failed to parse XML response: {e}")
-            logger.error(f"Raw response: {response.text}")
+            logger.error(f"Raw response saved at {file_path} for manual inspection")
             return False
 
         # Log the root element tag and attributes for debugging
@@ -165,44 +202,29 @@ def query_new_results(session, base_url, cookies, pending=False):
 
         if actual_count == 0:
             logger.info("No messages available for download.")
+            # Clean up the empty response file - no data worth keeping
+            try:
+                os.remove(file_path)
+                logger.debug(f"Removed empty response file: {file_path}")
+            except Exception:
+                pass
             return None  # None = no messages (skip ACK), False = error
 
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        file_name = f'response_{timestamp}.xml'
-        file_path = os.path.join(incoming_xml_folder_path, file_name)
-
+        # File already saved above - now copy to mule incoming folder
+        dest_path = os.path.join(incomingMuleFolder, file_name)
         try:
-            with open(file_path, 'w') as file:
-                file.write(response.text)
-            logger.info(f"Response saved to {file_path}")
+            shutil.copy(file_path, dest_path)
         except Exception as e:
-            logger.error(f"Failed to write file: {e}")
+            logger.error(f"Failed to copy file from {file_path} to {dest_path}: {e}")
             return False
 
-        # Copy to mule incoming folder
-        source = file_path
-        destination = incomingMuleFolder
-
-        try:
-            shutil.copy(source, destination)
-            logger.info(f"File copied from {source} to {destination} (incoming mule folder)")
-        except Exception as e:
-            logger.error(f"Failed to copy file from {source} to {destination} (incoming mule folder): {e}")
+        if not verify_file_on_disk(dest_path):
+            logger.error(f"CRITICAL: Mule folder file verification failed: {dest_path}")
             return False
 
-        logger.info(f"Successfully downloaded and saved {actual_count} message(s).")
+        logger.info(f"File copied to mule incoming folder: {dest_path}")
+        logger.info(f"SUCCESS: Downloaded and saved {actual_count} message(s). XML: {file_path}, Mule: {dest_path}")
         return True
-
-        # Process and save each message into HL7
-        # for i, message in enumerate(messages):
-        #     message_content = ET.tostring(message, encoding='unicode', method='text').strip()
-
-        #     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        #     file_path = os.path.join(incoming_HL7_folder_path, f'HL7Message_{timestamp}_{i + 1}.HL7')
-
-        #     with open(file_path, 'w') as file:
-        #         file.write(message_content)
-        #     print(f"Message {i + 1} saved to {file_path}")
 
     else:
         logger.info(f"XML fetch HTTP request failed with status code {response.status_code}.")
