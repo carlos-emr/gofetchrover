@@ -18,9 +18,11 @@ if [ -f "$OUTPUT_FILE" ]; then
     echo "Skipping download."
 else
     echo "Downloading JDK to $OUTPUT_FILE..."
-    wget -O "$OUTPUT_FILE" "$JDK_URL" || {
+    wget -O "$OUTPUT_FILE" "$JDK_URL"
+    if [ $? -ne 0 ] || [ ! -s "$OUTPUT_FILE" ]; then
         echo "Download failed!"
+        rm -f "$OUTPUT_FILE"
         exit 1
-    }
+    fi
     echo "Download completed."
 fi
