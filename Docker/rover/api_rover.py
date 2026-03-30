@@ -82,8 +82,6 @@ def authenticate(base_url):
 
             response = session.get(base_url)
 
-            # print(session.cookies)
-
             # Perform the POST request for authentication
             response = session.post(base_url+'hl7pull.aspx', data={
                 'Page': 'Login',
@@ -94,6 +92,7 @@ def authenticate(base_url):
 
             # Check response status and content
             if response.status_code == 200:
+                logger.debug(f"Auth response body: {response.text}")
                 if '<Authentication>AccessGranted</Authentication>' in response.text:
                     # Save cookies for later use
                     cookies = session.cookies
@@ -118,19 +117,32 @@ def query_new_results(session, base_url, cookies, pending=False):
     if pending:
         data['Pending'] = 'Yes'
 
+    logger.info(f"Querying for new results with data: {data}")
     response = session.post(base_url + 'hl7pull.aspx', data=data, cookies=cookies)
 
     if response.status_code == 200:
+        # Log the full response for debugging
+        logger.debug(f"Query response body (first 2000 chars): {response.text[:2000]}")
 
         # Parse the XML response
-        root = ET.fromstring(response.text)
+        try:
+            root = ET.fromstring(response.text)
+        except ET.ParseError as e:
+            logger.error(f"Failed to parse XML response: {e}")
+            logger.error(f"Raw response: {response.text}")
+            return False
 
         # Log the root element tag and attributes for debugging
-        logger.debug(f"Response root tag: {root.tag}, attributes: {root.attrib}")
+        logger.info(f"Response root tag: '{root.tag}', attributes: {root.attrib}")
+
+        # Log child elements for visibility
+        children = list(root)
+        logger.info(f"Root has {len(children)} child element(s): {[child.tag for child in children]}")
 
         # Find all Message elements
         messages = root.findall('.//Message')
         actual_count = len(messages)
+        logger.info(f"Found {actual_count} Message element(s) in response.")
 
         # Extract the MessageCount from the root element
         message_count = root.get('MessageCount')
@@ -142,6 +154,8 @@ def query_new_results(session, base_url, cookies, pending=False):
                 logger.info("MessageCount is not a valid integer.")
                 return False
 
+            logger.info(f"MessageCount attribute: {message_count}, actual messages found: {actual_count}")
+
             # Verify the count
             if actual_count != message_count:
                 logger.info(f"Mismatch: Expected {message_count} messages, but found {actual_count}.")
@@ -151,12 +165,12 @@ def query_new_results(session, base_url, cookies, pending=False):
 
         if actual_count == 0:
             logger.info("No messages available for download.")
-            return False
+            return None  # None = no messages (skip ACK), False = error
 
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         file_name = f'response_{timestamp}.xml'
         file_path = os.path.join(incoming_xml_folder_path, file_name)
-        
+
         try:
             with open(file_path, 'w') as file:
                 file.write(response.text)
@@ -165,43 +179,45 @@ def query_new_results(session, base_url, cookies, pending=False):
             logger.error(f"Failed to write file: {e}")
             return False
 
-        # Specify the source file path and the destination file path
+        # Copy to mule incoming folder
         source = file_path
         destination = incomingMuleFolder
 
         try:
-            # Copy the file
             shutil.copy(source, destination)
             logger.info(f"File copied from {source} to {destination} (incoming mule folder)")
         except Exception as e:
             logger.error(f"Failed to copy file from {source} to {destination} (incoming mule folder): {e}")
-        
+            return False
+
+        logger.info(f"Successfully downloaded and saved {actual_count} message(s).")
         return True
 
         # Process and save each message into HL7
         # for i, message in enumerate(messages):
         #     message_content = ET.tostring(message, encoding='unicode', method='text').strip()
-            
+
         #     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         #     file_path = os.path.join(incoming_HL7_folder_path, f'HL7Message_{timestamp}_{i + 1}.HL7')
-            
+
         #     with open(file_path, 'w') as file:
         #         file.write(message_content)
         #     print(f"Message {i + 1} saved to {file_path}")
 
     else:
-        logger.info("XML fetch HTTP request failed.")
+        logger.info(f"XML fetch HTTP request failed with status code {response.status_code}.")
         return False
 
 def send_acknowledgement(session, base_url, cookies, positive=True):
     ack_status = 'Positive' if positive else 'Negative'
+    logger.info(f"Sending {ack_status} acknowledgement...")
     response = session.post(base_url + 'hl7pull.aspx', data={
         'Page': 'HL7',
         'ACK': ack_status
     }, cookies=cookies)
-    
+
     if response.status_code == 200:
-        #print(response.text)
+        logger.debug(f"ACK response body: {response.text}")
         if '<HL7Messages/>' in response.text:
             logger.info("Acknowledgement sent.")
         elif '<HL7Messages ReturnCode="1"/>' in response.text:
@@ -211,17 +227,17 @@ def send_acknowledgement(session, base_url, cookies, positive=True):
         else:
             logger.info("Unexpected response for acknowledgement.")
     else:
-        logger.info("ACK HTTP request failed.")
+        logger.info(f"ACK HTTP request failed with status code {response.status_code}.")
 
 def sign_out(session, base_url, cookies):
     response = session.post(base_url, data={
         'Logout': 'Yes'
     }, cookies=cookies)
-    
+
     if response.status_code == 200:
         logger.info("Signed out successfully.")
     else:
-        logger.info("Signout HTTP request failed.")
+        logger.info(f"Signout HTTP request failed with status code {response.status_code}.")
 
 def main():
 
@@ -238,18 +254,24 @@ def main():
     os.makedirs(incoming_xml_folder_path, exist_ok=True)
 
     session, cookies = authenticate(base_url)
-    
+
     if session and cookies:
         status = query_new_results(session, base_url, cookies, pending=True)
 
-        if(status == True):
+        if status is True:
+            # Only send positive ACK when messages were successfully downloaded and saved
             send_acknowledgement(session, base_url, cookies, positive=True)
-            logger.info("Positive acknowledgement send")
+            logger.info("Positive acknowledgement sent")
+        elif status is None:
+            # No messages available - don't send any ACK
+            logger.info("No messages to process, skipping acknowledgement.")
         else:
-            send_acknowledgement(session, base_url, cookies, positive=False)
-            logger.info("Negative acknowledgement send")
+            # Error occurred - don't send ACK so messages stay available for retry
+            logger.info("Download failed, skipping acknowledgement so messages remain available for next attempt.")
 
         sign_out(session, base_url, cookies)
+    else:
+        logger.error("Authentication failed, cannot proceed.")
 
     # Ensure the lock file is removed after the script finishes
     # remove_lock()
