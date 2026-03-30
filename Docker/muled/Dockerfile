@@ -2,7 +2,9 @@
 FROM ubuntu:24.04
 
 # Install necessary packages
-RUN apt-get update && \
+# i386 architecture needed for Mule's 32-bit wrapper binary
+RUN dpkg --add-architecture i386 && \
+    apt-get update && \
     apt-get install -y \
     wget \
     dpkg \
@@ -16,6 +18,8 @@ RUN apt-get update && \
     libxrender1 \
     libxtst6 \
     zlib1g \
+    libc6:i386 \
+    zlib1g:i386 \
     fonts-dejavu \
     java-common \
     xz-utils \
