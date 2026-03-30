@@ -7,7 +7,7 @@ RUN apt-get update && \
     wget \
     dpkg \
     git \
-    libasound2 \
+    libasound2t64 \
     libfreetype6 \
     libfontconfig1 \
     libx11-6 \
