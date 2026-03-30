@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # URL of the JRE
-JRE_URL="https://builds.openlogic.com/downloadJDK/openlogic-openjdk-jre/8u422-b05/openlogic-openjdk-jre-8u422-b05-linux-x32-deb.deb"
+JRE_URL="https://cdn.azul.com/zulu/bin/zulu8.92.0.21-ca-jre8.0.482-linux_amd64.deb"
 
 # Target download directory
 TARGET_DIR="./Docker/muled/jre"
@@ -10,7 +10,7 @@ TARGET_DIR="./Docker/muled/jre"
 mkdir -p "$TARGET_DIR"
 
 # Output file path
-OUTPUT_FILE="$TARGET_DIR/openlogic-openjdk-jre-8u422-b05-linux-x32.deb"
+OUTPUT_FILE="$TARGET_DIR/zulu8-jre-amd64.deb"
 
 # Check if file already exists
 if [ -f "$OUTPUT_FILE" ]; then
