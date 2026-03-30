@@ -252,6 +252,7 @@ def main():
 
     os.makedirs(incoming_HL7_folder_path, exist_ok=True)
     os.makedirs(incoming_xml_folder_path, exist_ok=True)
+    os.makedirs(incomingMuleFolder, exist_ok=True)
 
     session, cookies = authenticate(base_url)
 
