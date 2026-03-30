@@ -230,7 +230,7 @@ def send_acknowledgement(session, base_url, cookies, positive=True):
         logger.info(f"ACK HTTP request failed with status code {response.status_code}.")
 
 def sign_out(session, base_url, cookies):
-    response = session.post(base_url, data={
+    response = session.post(base_url + 'hl7pull.aspx', data={
         'Logout': 'Yes'
     }, cookies=cookies)
 
@@ -259,15 +259,17 @@ def main():
         status = query_new_results(session, base_url, cookies, pending=True)
 
         if status is True:
-            # Only send positive ACK when messages were successfully downloaded and saved
+            # Messages successfully downloaded and saved - mark them as received
             send_acknowledgement(session, base_url, cookies, positive=True)
             logger.info("Positive acknowledgement sent")
         elif status is None:
-            # No messages available - don't send any ACK
+            # No messages available (<HL7Messages/>) - nothing to acknowledge
             logger.info("No messages to process, skipping acknowledgement.")
         else:
-            # Error occurred - don't send ACK so messages stay available for retry
-            logger.info("Download failed, skipping acknowledgement so messages remain available for next attempt.")
+            # Error occurred - send negative ACK so messages remain available for retry
+            # Per Excelleris docs: must always ACK after query or get blocked for 10 minutes
+            send_acknowledgement(session, base_url, cookies, positive=False)
+            logger.info("Negative acknowledgement sent (messages remain available for retry)")
 
         sign_out(session, base_url, cookies)
     else:
