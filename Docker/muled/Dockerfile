@@ -35,7 +35,7 @@ RUN dpkg -i /tmp/zulu8-jre.deb && \
 RUN java -version
 
 # Define environment variables for Mule and Java
-ENV JAVA_HOME=/usr/lib/jvm/zulu8
+ENV JAVA_HOME=/usr/lib/jvm/zre-8-amd64
 ENV MULE_HOME=/mule/mule-1.3.3
 ENV PATH=$MULE_HOME/bin:$PATH
 

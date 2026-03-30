@@ -44,4 +44,4 @@ RUN dpkg -i /tmp/zulu8-jdk.deb && \
 RUN java -version
 
 # Define environment variables for Java
-ENV JAVA_HOME=/usr/lib/jvm/zulu8
+ENV JAVA_HOME=/usr/lib/jvm/zulu-8-amd64
